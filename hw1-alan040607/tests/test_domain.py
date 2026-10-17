@@ -22,20 +22,30 @@ def test_invalid_ease_rejected(ease):
 
 @pytest.mark.parametrize("ease", [1, 6, 10])
 def test_valid_ease_accepted(ease):
-    assert Bicycle(inventory_number="B", name="Велосипед", beginner_ease=ease).beginner_ease == ease
+    bicycle = Bicycle(inventory_number="B", name="Велосипед", beginner_ease=ease)
+
+    assert bicycle.beginner_ease == ease
 
 
 @pytest.mark.parametrize("field", ["inventory_number", "name"])
 @pytest.mark.parametrize("value", ["", "  ", None, 123])
 def test_blank_or_nontext_identity_rejected(field, value):
-    fields = {"inventory_number": "H", "name": "Шлем", field: value}
+    fields = {"inventory_number": "H", "name": "Шлем"}
+    fields[field] = value
     with pytest.raises(ValueError, match="не могут быть пустыми"):
         Helmet(**fields)
 
 
-def test_identity_trimmed_and_immutable():
+def test_spaces_are_removed_from_number_and_name():
     helmet = Helmet(inventory_number=" H ", name=" Шлем ")
-    assert (helmet.inventory_number, helmet.name) == ("H", "Шлем")
+
+    assert helmet.inventory_number == "H"
+    assert helmet.name == "Шлем"
+
+
+def test_inventory_number_cannot_be_changed():
+    helmet = Helmet(inventory_number="H", name="Шлем")
+
     with pytest.raises(FrozenInstanceError):
         helmet.inventory_number = "NEW"
 
@@ -52,7 +62,9 @@ def test_invalid_energy_rejected(energy, constructor):
 
 @pytest.mark.parametrize("energy", [0, 0.5, 12])
 def test_valid_energy(energy):
-    assert ChargingCabinet(inventory_number="C", name="Шкаф", daily_energy_kwh=energy)
+    cabinet = ChargingCabinet(inventory_number="C", name="Шкаф", daily_energy_kwh=energy)
+
+    assert cabinet.daily_energy_kwh == energy
 
 
 def test_energy_integer_overflow_is_a_validation_error():

@@ -10,7 +10,14 @@ from vyshkat.cli import ConsoleApp
 def run_dialog(fleet, answers):
     iterator = iter(answers)
     output = []
-    app = ConsoleApp(fleet, read=lambda _: next(iterator), write=output.append)
+
+    def read_answer(prompt):
+        try:
+            return next(iterator)
+        except StopIteration:
+            pytest.fail(f"В тесте не хватает ответа на вопрос: {prompt}")
+
+    app = ConsoleApp(fleet, read=read_answer, write=output.append)
     app.run()
     return "\n".join(output)
 
@@ -35,59 +42,18 @@ def test_end_of_input_is_graceful(fleet, error):
 
 
 def test_dialog_adds_all_six_types_rejects_broken_vehicle_and_prints_reports(fleet):
-    output = run_dialog(
-        fleet,
-        [
-            "1",
-            "1",
-            "S",
-            "Самокат",
-            "6",
-            "не знаю",
-            "да",
-            "2,5",
-            "д",
-            "1",
-            "2",
-            "B",
-            "Вело",
-            "5",
-            "y",
-            "1",
-            "3",
-            "E",
-            "Электро",
-            "8",
-            "yes",
-            "1.5",
-            "д",
-            "2",
-            "1",
-            "H",
-            "Шлем",
-            "2",
-            "2",
-            "D",
-            "Док",
-            "2",
-            "3",
-            "C",
-            "Шкаф",
-            "4",
-            "1",
-            "1",
-            "BAD",
-            "Сломанный",
-            "9",
-            "н",
-            "3",
-            "нет",
-            "3",
-            "4",
-            "5",
-            "0",
-        ],
-    )
+    # Один шаг диалога на строку: пункт меню, вид объекта, затем его поля.
+    answers = ["1", "1", "S", "Самокат", "6", "не знаю", "да", "2,5", "д"]
+    answers += ["1", "2", "B", "Вело", "5", "y"]
+    answers += ["1", "3", "E", "Электро", "8", "yes", "1.5", "д"]
+    answers += ["2", "1", "H", "Шлем"]
+    answers += ["2", "2", "D", "Док"]
+    answers += ["2", "3", "C", "Шкаф", "4"]
+    answers += ["1", "1", "BAD", "Сломанный", "9", "н", "3", "нет"]
+    answers += ["3", "4", "5", "0"]  # Отчёты и выход.
+
+    output = run_dialog(fleet, answers)
+
     assert "Введите д (да) или н (нет)" in output
     assert "ОТКЛОНЕНО: Сломанный" in output
     assert "Транспорт: 3; вещи: 3; всего: 6" in output
@@ -98,40 +64,48 @@ def test_dialog_adds_all_six_types_rejects_broken_vehicle_and_prints_reports(fle
     assert "Шкаф | № C" in output
 
 
-def test_cancel_invalid_type_data_and_duplicate_keep_menu_alive(fleet):
-    output = run_dialog(
-        fleet,
-        [
-            "1",
-            "0",
-            "2",
-            "99",
-            "1",
-            "2",
-            "BAD",
-            "Ошибка",
-            "не число",
-            "2",
-            "3",
-            "BAD",
-            "Ошибка",
-            "nan",
-            "2",
-            "1",
-            "H",
-            "Шлем",
-            "2",
-            "1",
-            "H",
-            "Дубликат",
-            "0",
-        ],
-    )
+def test_cancel_returns_to_menu_without_adding_asset(fleet):
+    output = run_dialog(fleet, ["1", "0", "0"])
     assert "Добавление отменено" in output
-    assert "Неизвестный вид" in output
+    assert "До встречи" in output
+    assert fleet.inventory() == ()
+
+
+@pytest.mark.parametrize(
+    "answers, expected_error",
+    [
+        pytest.param(["2", "99"], "Неизвестный вид", id="unknown-item-type"),
+        pytest.param(
+            ["1", "2", "B", "Велосипед", "не число"],
+            "Простота для новичка должна быть целым числом",
+            id="ease-is-not-a-number",
+        ),
+        pytest.param(
+            ["2", "3", "C", "Шкаф", "nan"],
+            "Расход энергии должен быть конечным",
+            id="energy-is-nan",
+        ),
+    ],
+)
+def test_invalid_input_does_not_add_asset_and_allows_exit(fleet, answers, expected_error):
+    output = run_dialog(fleet, answers + ["0"])
+
+    assert expected_error in output
+    assert "До встречи" in output
+    assert fleet.inventory() == ()
+
+
+def test_duplicate_in_dialog_keeps_original_item(fleet):
+    answers = ["2", "1", "H", "Первый шлем"]
+    answers += ["2", "1", "H", "Другой шлем"]
+    answers += ["0"]
+
+    output = run_dialog(fleet, answers)
+
     assert "уже занят" in output
-    assert output.count("Ошибка:") == 4
+    assert "До встречи" in output
     assert fleet.report().item_count == 1
+    assert fleet.inventory()[0].name == "Первый шлем"
 
 
 def test_non_numeric_energy_has_readable_error(fleet):
@@ -148,34 +122,12 @@ def test_main_interactive(monkeypatch):
 
 
 def test_module_entrypoint_accepts_console_input_in_real_process():
-    answers = [
-        "3",
-        "5",
-        "1",
-        "1",
-        "S-INPUT",
-        "Самокат из ввода",
-        "6",
-        "д",
-        "2,5",
-        "д",
-        "1",
-        "3",
-        "E-BAD",
-        "Неисправный",
-        "8",
-        "д",
-        "1",
-        "н",
-        "2",
-        "1",
-        "H-INPUT",
-        "Шлем из ввода",
-        "3",
-        "4",
-        "5",
-        "0",
-    ]
+    answers = ["3", "5"]  # Начальный баланс должен быть пустым.
+    answers += ["1", "1", "S-INPUT", "Самокат из ввода", "6", "д", "2,5", "д"]
+    answers += ["1", "3", "E-BAD", "Неисправный", "8", "д", "1", "н"]
+    answers += ["2", "1", "H-INPUT", "Шлем из ввода"]
+    answers += ["3", "4", "5", "0"]
+
     result = subprocess.run(
         [sys.executable, "-X", "utf8", "-m", "vyshkat"],
         input="\n".join(answers) + "\n",
