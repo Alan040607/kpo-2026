@@ -1,4 +1,4 @@
-"""Консольный адаптер: повтор ввода при ошибке, чистый выход по EOF/Ctrl+C."""
+"""Меню приложения и чтение пользовательского ввода."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,9 +26,13 @@ class AssetOption:
 
 # Только UI знает, какие конкретные типы пользователь может создать из меню.
 VEHICLES = {
-    "1": AssetOption("Электросамокат", Scooter, True, True, True),
-    "2": AssetOption("Велосипед", Bicycle, True),
-    "3": AssetOption("Электровелосипед", ElectricBicycle, True, True, True),
+    "1": AssetOption(
+        "Электросамокат", Scooter, is_vehicle=True, uses_energy=True, has_battery=True
+    ),
+    "2": AssetOption("Велосипед", Bicycle, is_vehicle=True),
+    "3": AssetOption(
+        "Электровелосипед", ElectricBicycle, is_vehicle=True, uses_energy=True, has_battery=True
+    ),
 }
 ITEMS = {
     "1": AssetOption("Шлем", Helmet),
@@ -50,13 +54,6 @@ class ConsoleApp:
 
     def run(self) -> None:
         self.write("ВышКат — Доедем до дедлайна! Данные хранятся до завершения программы.")
-        actions = {
-            "1": lambda: self.add_asset(VEHICLES),
-            "2": lambda: self.add_asset(ITEMS),
-            "3": self.show_report,
-            "4": self.show_beginners,
-            "5": self.show_inventory,
-        }
         try:
             while True:
                 self.write(
@@ -66,12 +63,19 @@ class ConsoleApp:
                 choice = self.read("Выберите действие: ").strip()
                 if choice == "0":
                     break
-                action = actions.get(choice)
-                if action is None:
-                    self.write("Нет такого пункта. Введите число от 0 до 5.")
-                    continue
                 try:
-                    action()
+                    if choice == "1":
+                        self.add_asset(VEHICLES)
+                    elif choice == "2":
+                        self.add_asset(ITEMS)
+                    elif choice == "3":
+                        self.show_report()
+                    elif choice == "4":
+                        self.show_beginners()
+                    elif choice == "5":
+                        self.show_inventory()
+                    else:
+                        self.write("Нет такого пункта. Введите число от 0 до 5.")
                 except ValueError as error:
                     self.write(f"Ошибка: {error} Объект не добавлен; повторите через меню.")
         except (EOFError, KeyboardInterrupt):
@@ -87,6 +91,19 @@ class ConsoleApp:
                 return False
             self.write("Введите д (да) или н (нет).")
 
+    def _read_ease(self) -> int:
+        try:
+            return int(self.read("Простота для новичка (1–10): "))
+        except ValueError:
+            raise ValueError("Простота для новичка должна быть целым числом от 1 до 10.") from None
+
+    def _read_energy(self) -> float:
+        value = self.read("Суточный расход энергии, кВт·ч: ").replace(",", ".")
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError("Расход энергии должен быть числом, например 2,5.") from None
+
     def add_asset(self, options: dict[str, AssetOption]) -> None:
         for key, option in options.items():
             self.write(f"{key} — {option.label}")
@@ -97,28 +114,19 @@ class ConsoleApp:
         if key not in options:
             raise ValueError("Неизвестный вид объекта.")
         option = options[key]
-        fields = {
+        fields: dict[str, str | int | float | bool] = {
             "inventory_number": self.read("Инвентарный номер (регистр учитывается): "),
             "name": self.read("Наименование: "),
         }
         if option.is_vehicle:
-            try:
-                fields["beginner_ease"] = int(self.read("Простота для новичка (1–10): "))
-            except ValueError:
-                raise ValueError(
-                    "Простота для новичка должна быть целым числом от 1 до 10."
-                ) from None
+            fields["beginner_ease"] = self._read_ease()
             fields["brakes_ok"] = self._yes_no("Тормоза исправны?")
         if option.uses_energy:
-            try:
-                fields["daily_energy_kwh"] = float(
-                    self.read("Суточный расход энергии, кВт·ч: ").replace(",", ".")
-                )
-            except ValueError:
-                raise ValueError("Расход энергии должен быть числом, например 2,5.") from None
+            fields["daily_energy_kwh"] = self._read_energy()
         if option.has_battery:
             fields["battery_ok"] = self._yes_no("Аккумулятор исправен?")
-        self.accept(option.constructor(**fields))
+        asset = option.constructor(**fields)
+        self.accept(asset)
 
     def accept(self, asset: Asset) -> None:
         result = self.fleet.register(asset)

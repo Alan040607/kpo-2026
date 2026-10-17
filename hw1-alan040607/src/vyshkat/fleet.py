@@ -1,10 +1,15 @@
 """Приёмка и отчёты. Здесь нет консольного ввода и создания зависимостей."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import fsum
 
 from vyshkat.domain import Asset, EnergyConsumer, Inventoriable, Item, Transport
 from vyshkat.inspection import InspectionResult, InspectionService
+
+
+def _sum_energy(assets: Iterable[Asset]) -> float:
+    return fsum(asset.daily_energy_kwh for asset in assets if isinstance(asset, EnergyConsumer))
 
 
 @dataclass(frozen=True)
@@ -26,25 +31,23 @@ class FleetService:
             raise ValueError("На баланс можно поставить только транспорт или вещь.")
         if asset.inventory_number in self._assets:
             raise ValueError(f"Инвентарный номер {asset.inventory_number} уже занят.")
+
         if isinstance(asset, Transport):
             result = self._inspection.inspect(asset)
             if not result.accepted:
                 return result
         else:
             result = InspectionResult(True, "Вещь поставлена на баланс.")
+
         if isinstance(asset, EnergyConsumer):
-            # Даже конечные входные числа могут переполнить суммарный float.
+            # Проверяем будущую сумму до записи, чтобы ошибка не меняла баланс.
+            updated_assets = list(self._assets.values())
+            updated_assets.append(asset)
             try:
-                fsum(
-                    [asset.daily_energy_kwh]
-                    + [
-                        entry.daily_energy_kwh
-                        for entry in self._assets.values()
-                        if isinstance(entry, EnergyConsumer)
-                    ]
-                )
+                _sum_energy(updated_assets)
             except OverflowError:
                 raise ValueError("Суммарный расход энергии слишком велик.") from None
+
         self._assets[asset.inventory_number] = asset
         return result
 
@@ -59,14 +62,10 @@ class FleetService:
         )
 
     def report(self) -> FleetReport:
-        vehicles = tuple(a for a in self._assets.values() if isinstance(a, Transport))
+        vehicles = [asset for asset in self._assets.values() if isinstance(asset, Transport)]
         return FleetReport(
             vehicle_count=len(vehicles),
             item_count=len(self._assets) - len(vehicles),
-            vehicle_energy_kwh=fsum(
-                a.daily_energy_kwh for a in vehicles if isinstance(a, EnergyConsumer)
-            ),
-            total_energy_kwh=fsum(
-                a.daily_energy_kwh for a in self._assets.values() if isinstance(a, EnergyConsumer)
-            ),
+            vehicle_energy_kwh=_sum_energy(vehicles),
+            total_energy_kwh=_sum_energy(self._assets.values()),
         )

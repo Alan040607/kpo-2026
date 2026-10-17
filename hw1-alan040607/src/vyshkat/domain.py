@@ -1,4 +1,4 @@
-"""Неизменяемые объекты предметной области и небольшие интерфейсы возможностей."""
+"""Транспорт, вещи и общие правила проверки их данных."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -40,11 +40,13 @@ class Asset(ABC):
     name: str
 
     def __post_init__(self) -> None:
-        for field in ("inventory_number", "name"):
-            value = getattr(self, field)
+        for value in (self.inventory_number, self.name):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("Наименование и инвентарный номер не могут быть пустыми.")
-            object.__setattr__(self, field, value.strip())
+
+        # В frozen dataclass обычное присваивание запрещено, даже при инициализации.
+        object.__setattr__(self, "inventory_number", self.inventory_number.strip())
+        object.__setattr__(self, "name", self.name.strip())
 
     @property
     @abstractmethod
